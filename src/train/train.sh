@@ -1,0 +1,11 @@
+python supervised_train.py \
+                --gpu 0 \
+                --exp-name paul-abd \
+                --data DUKE \
+                --batch-size 8 \
+                --use-of \
+                --abd-dan cam pam \
+                --abd-np 2 \
+                --shallow-cam \
+                --use-ow \
+                --lr 0.0001 

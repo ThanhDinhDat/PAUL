@@ -2,10 +2,21 @@ import torch.nn as nn
 import math
 import torch.utils.model_zoo as model_zoo
 from torch import load
+from copy import deepcopy
 
+from components import branches
+from components.shallow_cam import ShallowCAM
 import torchvision.models.resnet
 __all__ = ['resnet50',]
 
+
+model_urls = {
+    'resnet18': 'https://download.pytorch.org/models/resnet18-5c106cde.pth',
+    'resnet34': 'https://download.pytorch.org/models/resnet34-333f7ec4.pth',
+    'resnet50': 'https://download.pytorch.org/models/resnet50-19c8e357.pth',
+    'resnet101': 'https://download.pytorch.org/models/resnet101-5d3b4d8f.pth',
+    'resnet152': 'https://download.pytorch.org/models/resnet152-b121ed2d.pth',
+}
 
 
 def conv3x3(in_planes, out_planes, stride=1):
@@ -91,6 +102,8 @@ class ResNet(nn.Module):
 
     def __init__(self, block, layers, class_num=1000, last_stride=2, is_for_test=False, norm=False):
         self.inplanes = 64
+        self.block = block
+        self.class_num = class_num
         self.is_for_test = is_for_test
         super(ResNet, self).__init__()
         self.conv1 = nn.Conv2d(3, 64, kernel_size=7, stride=2, padding=3,
@@ -130,49 +143,188 @@ class ResNet(nn.Module):
 
         return nn.Sequential(*layers)
 
+    # def forward(self, x):
+    #     x = self.conv1(x)
+    #     x = self.bn1(x)
+    #     x = self.relu(x)
+    #     x = self.maxpool(x)
+
+    #     x = self.layer1(x)
+    #     x = self.layer2(x)
+    #     x = self.layer3(x)
+    #     x = self.layer4(x)
+
+        # x = self.avgpool(x)
+        # x = x.view(x.size(0), -1)
+
+        # if self.is_for_test:
+        #     return x
+        # x = self.fc(x)
+        # return x
+
+
+    # def get_param(self, lr):
+    #     new_param = self.fc.parameters()
+    #     # return new_param
+    #     new_param_id = [id(p) for p in new_param]
+    #     finetuned_params = []
+    #     for p in self.parameters():
+    #         if id(p) not in new_param_id:
+    #             finetuned_params.append(p)
+    #     return [{'params': new_param, 'lr': lr},
+    #             {'params': finetuned_params, 'lr': 1e-1 * lr}]
+
+
+class ResNetCommonBranch(nn.Module):
+
+    def __init__(self, owner, backbone, args):
+
+        super().__init__()
+
+        self.backbone1 = nn.Sequential(
+            backbone.conv1,
+            backbone.bn1,
+            backbone.relu,
+            backbone.maxpool,
+            backbone.layer1
+        )
+        self.shallow_cam = ShallowCAM(args, 256)
+        self.backbone2 = nn.Sequential(
+            backbone.layer2,
+            backbone.layer3,
+            # backbone.layer4
+        )
+
+    def backbone_modules(self):
+
+        return [self.backbone1, self.backbone2]
+
     def forward(self, x):
-        x = self.conv1(x)
-        x = self.bn1(x)
-        x = self.relu(x)
-        x = self.maxpool(x)
 
-        x = self.layer1(x)
-        x = self.layer2(x)
-        x = self.layer3(x)
-        x = self.layer4(x)
+        x = self.backbone1(x)
+        intermediate = x = self.shallow_cam(x)
+        x = self.backbone2(x)
 
-        x = self.avgpool(x)
-        x = x.view(x.size(0), -1)
+        return x, intermediate
 
+class ResNetDeepBranch(nn.Module):
+
+    def __init__(self, owner, backbone, args):
+
+        super().__init__()
+        self.is_for_test = backbone.is_for_test
+        self.backbone = backbone.layer4
+        # self.backbone = deepcopy(backbone.layer4)
+        self.avgpool = nn.AvgPool2d(kernel_size=(7, 7), stride=1)
+        if backbone.is_for_test is False:
+            self.fc = nn.Linear(512 * backbone.block.expansion, backbone.class_num)
+        
+
+        self.out_dim = 2048
+
+    def backbone_modules(self):
+
+        return [self.backbone]
+
+    def forward(self, x):
+        x = self.backbone(x)
+        # print('Shape: {}'.format(x.shape))
+        # x = self.avgpool(x)
+        # print('Shape: {}'.format(x.shape))
+        # x = x.view(x.size(0), -1)
+        # print('Shape: {}'.format(x.shape))
         if self.is_for_test:
             return x
-        x = self.fc(x)
+        # x = self.fc(x)
+        # print('Shape: {}'.format(x.shape))
         return x
 
+class ResNetMGNLikeCommonBranch(nn.Module):
 
-    def get_param(self, lr):
-        new_param = self.fc.parameters()
-        # return new_param
-        new_param_id = [id(p) for p in new_param]
-        finetuned_params = []
-        for p in self.parameters():
-            if id(p) not in new_param_id:
-                finetuned_params.append(p)
-        return [{'params': new_param, 'lr': lr},
-                {'params': finetuned_params, 'lr': 1e-1 * lr}]
+    def __init__(self, owner, backbone, args):
+
+        super().__init__()
+
+        self.backbone1 = nn.Sequential(
+            backbone.conv1,
+            backbone.bn1,
+            backbone.relu,
+            backbone.maxpool,
+            backbone.layer1
+        )
+        self.shallow_cam = ShallowCAM(args, 256)
+        self.backbone2 = nn.Sequential(
+            backbone.layer2,
+            backbone.layer3[0],
+        )
+
+    def backbone_modules(self):
+
+        return [self.backbone1, self.backbone2]
+
+    def forward(self, x):
+
+        x = self.backbone1(x)
+        intermediate = x = self.shallow_cam(x)
+        x = self.backbone2(x)
+
+        return x, intermediate
+
+class ResNetMGNLikeDeepBranch(nn.Module):
+
+    def __init__(self, owner, backbone, args):
+
+        super().__init__()
+
+        self.backbone = nn.Sequential(
+            *deepcopy(backbone.layer3[1:]),
+            deepcopy(backbone.layer4)
+        )
+        self.out_dim = 2048
+
+    def backbone_modules(self):
+
+        return [self.backbone]
+
+    def forward(self, x):
+        return self.backbone(x)
 
 
-def resnet50(pretrained=True, remove=False, param_path='../../imagenet_models/resnet50-19c8e357.pth', **kwargs):
+class MultiBranchResNet(branches.MultiBranchNetwork):
+
+    def _get_common_branch(self, backbone, args):
+
+        return ResNetCommonBranch(self, backbone, args)
+
+    def _get_middle_subbranch_for(self, backbone, args, last_branch_class):
+
+        return ResNetDeepBranch(self, backbone, args)
+
+class MultiBranchMGNLikeResNet(branches.MultiBranchNetwork):
+
+    def _get_common_branch(self, backbone, args):
+
+        return ResNetMGNLikeCommonBranch(self, backbone, args)
+
+    def _get_middle_subbranch_for(self, backbone, args, last_branch_class):
+
+        return ResNetMGNLikeDeepBranch(self, backbone, args)
+
+
+def resnet50(num_classes, args, pretrained=True, remove=False, param_path='../../imagenet_models/resnet50-19c8e357.pth', **kwargs):
     """Constructs a ResNet-50 models.
     Args:
         pretrained (bool): If True, returns a models pre-trained on ImageNet
     """
-    model = ResNet(Bottleneck, [3, 4, 6, 3], **kwargs)
+    backbone = ResNet(Bottleneck, [3, 4, 6, 3], **kwargs)
+    model = MultiBranchResNet(backbone, args, num_classes)
     if pretrained:
-        model.load_state_dict(remove_fc_parameters(load(param_path)), strict=False)
+        # backbone.load_state_dict(remove_fc_parameters(load(param_path)), strict=False)
+        backbone.load_state_dict(remove_fc_parameters(model_zoo.load_url(model_urls['resnet50'])), strict=False)
+
         print("using ImageNet pre-trained model to initialize the weight")
     if remove:
-        remove_fc(model)
+        remove_fc(backbone)
     return model
 
 

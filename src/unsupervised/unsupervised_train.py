@@ -78,6 +78,32 @@ parser.add_argument('--margin', default=2, type=float, help='the margin of local
 ## pretrained model
 parser.add_argument('--pre-name', default=None, type=str, help='use which pretrained model to initialize the model')
 
+# ************************************************************
+# Branches Related
+# ************************************************************
+parser.add_argument('--compatibility', action='store_true')
+parser.add_argument('--branches', nargs='+', type=str, default=['global', 'abd'])
+parser.add_argument('--dropout', type=float, default=0.5)
+parser.add_argument('--global-dim', type=int, default=1024)
+parser.add_argument('--global-max-pooling', action='store_true')
+parser.add_argument('--abd-dim', type=int, default=1024)
+parser.add_argument('--abd-np', type=int, default=2)
+parser.add_argument('--abd-dan', nargs='+', type=str, default=[])
+parser.add_argument('--abd-dan-no-head', action='store_true')
+parser.add_argument('--shallow-cam', action='store_true')
+parser.add_argument('--np-dim', type=int, default=1024)
+parser.add_argument('--np-np', type=int, default=2)
+parser.add_argument('--np-with-global', action='store_true')
+parser.add_argument('--np-max-pooling', action='store_true')
+parser.add_argument('--dan-dim', type=int, default=1024)
+parser.add_argument('--dan-dan', nargs='+', type=str, default=[])
+parser.add_argument('--dan-dan-no-head', action='store_true')
+parser.add_argument('--use-of', action='store_true')
+parser.add_argument('--of-beta', type=float, default=1e-6)
+parser.add_argument('--of-start-epoch', type=int, default=23)
+parser.add_argument('--of-position', nargs='+', type=str, default=['before', 'after', 'cam', 'pam', 'intermediate'])
+parser.add_argument('--use-ow', action='store_true')
+parser.add_argument('--ow-beta', type=float, default=1e-3)
 
 args = parser.parse_args()
 os.environ['CUDA_VISIBLE_DEVICES'] = args.gpu
@@ -119,7 +145,7 @@ def main():
         print('the class number of pretrained model is {}'.format(class_num))
     else:
         raise RuntimeError('require a pretrained model to initialize the weight')
-    model = net(class_num=class_num)
+    model = net(args=args, class_num=class_num)
     model = torch.nn.DataParallel(model).cuda()
     model.load_state_dict(pretrained_model)
 

@@ -60,12 +60,12 @@ class PatchGenerator(nn.Module):
 
 
 class PatchNet(nn.Module):
-    def __init__(self, class_num=1000, backbone=resnet50, pretrained=True, param_path='../../imagenet_models/resnet50-19c8e357.pth',
+    def __init__(self, args, class_num=1000, backbone=resnet50, pretrained=True, param_path='../../imagenet_models/resnet50-19c8e357.pth',
                  is_for_test=False):
         super(PatchNet,self).__init__()
 
         self.is_for_test = is_for_test
-        self.backbone = backbone(pretrained=pretrained, param_path=param_path, remove=True, last_stride=1)
+        self.backbone = backbone(num_classes=class_num, args=args, pretrained=pretrained, param_path=param_path, remove=True, last_stride=1)
         self.new = nn.ModuleList()
         self.stripe = 6
         down = nn.ModuleList([nn.Sequential(nn.Conv2d(2048, 256, 1),
@@ -97,16 +97,23 @@ class PatchNet(nn.Module):
                 nn.init.constant_(m.bias, 0)
 
     def forward(self, x):
-        x = self.backbone.conv1(x)
-        x = self.backbone.bn1(x)
-        x = self.backbone.relu(x)
-        x = self.backbone.maxpool(x)
+        # x = self.backbone.conv1(x)
+        # x = self.backbone.bn1(x)
+        # x = self.backbone.relu(x)
+        # x = self.backbone.maxpool(x)
 
-        x = self.backbone.layer1(x)
-        x = self.backbone.layer2(x)
-        x = self.backbone.layer3(x)
-        x = self.backbone.layer4(x)
-        patch = self.patch_proposal(x)
+        # x = self.backbone.layer1(x)
+        # x = self.backbone.layer2(x)
+        # x = self.backbone.layer3(x)
+        # x = self.backbone.layer4(x)
+        x, intermidiate, y, feature_dict = self.backbone(x)
+        print('feature_dict intermediate: {}'.format(feature_dict['intermediate'][0].shape))
+        print('feature_dict before: {}'.format(feature_dict['before'][0].shape))
+        print('feature_dict pam: {}'.format(feature_dict['pam'][0].shape))
+        print('feature_dict cam: {}'.format(feature_dict['cam'][0].shape))
+        print('feature_dict after: {}'.format(feature_dict['after'][0].shape))
+        # print(feature_dict)
+        patch = self.patch_proposal(feature_dict['after'][0])
 
         assert x.size(2) % self.stripe == 0
 
@@ -133,13 +140,13 @@ class PatchNet(nn.Module):
         if self.is_for_test is True:
             return local_feat_list
 
-        return logits_list, local_feat_list, embedding_list
+        return logits_list, local_feat_list, embedding_list, intermidiate
 
 
 class PatchNetUn(PatchNet):
-    def __init__(self, class_num=1000, backbone=resnet50, pretrained=False, is_for_test=False,
+    def __init__(self, args, class_num=1000, backbone=resnet50, pretrained=False, is_for_test=False,
                  param_path='../../imagenet_models/resnet50-19c8e357.pth'):
-        super(PatchNetUn, self).__init__(class_num=class_num, backbone=backbone, param_path=param_path,
+        super(PatchNetUn, self).__init__(args=args, class_num=class_num, backbone=backbone, param_path=param_path,
                                          pretrained=pretrained, is_for_test=is_for_test)
 
         down = nn.ModuleList([nn.Sequential(nn.Conv2d(2048, 256, 1),

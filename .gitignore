@@ -2,3 +2,4 @@ data/
 feature/
 result/
 snapshot/
+__pycache__

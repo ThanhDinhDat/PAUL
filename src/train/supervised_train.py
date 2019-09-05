@@ -22,6 +22,7 @@ sys.path.append("..")
 import models
 import dataset
 from utils import *
+from utils.torchtools import count_num_param, open_all_layers, open_specified_layers
 import evaluate
 import loss
 
@@ -70,6 +71,32 @@ parser.add_argument('--width', type=int, default=128)
 parser.add_argument('--tloss', default=0.1, type=float, help='the weight of the triplet margin loss')
 parser.add_argument('--margin', default=1, type=float, help='the margin of the triplet margin loss')
 
+# ************************************************************
+# Branches Related
+# ************************************************************
+parser.add_argument('--compatibility', action='store_true')
+parser.add_argument('--branches', nargs='+', type=str, default=['global', 'abd'])
+parser.add_argument('--dropout', type=float, default=0.5)
+parser.add_argument('--global-dim', type=int, default=1024)
+parser.add_argument('--global-max-pooling', action='store_true')
+parser.add_argument('--abd-dim', type=int, default=1024)
+parser.add_argument('--abd-np', type=int, default=2)
+parser.add_argument('--abd-dan', nargs='+', type=str, default=[])
+parser.add_argument('--abd-dan-no-head', action='store_true')
+parser.add_argument('--shallow-cam', action='store_true')
+parser.add_argument('--np-dim', type=int, default=1024)
+parser.add_argument('--np-np', type=int, default=2)
+parser.add_argument('--np-with-global', action='store_true')
+parser.add_argument('--np-max-pooling', action='store_true')
+parser.add_argument('--dan-dim', type=int, default=1024)
+parser.add_argument('--dan-dan', nargs='+', type=str, default=[])
+parser.add_argument('--dan-dan-no-head', action='store_true')
+parser.add_argument('--use-of', action='store_true')
+parser.add_argument('--of-beta', type=float, default=1e-6)
+parser.add_argument('--of-start-epoch', type=int, default=23)
+parser.add_argument('--of-position', nargs='+', type=str, default=['before', 'after', 'cam', 'pam', 'intermediate'])
+parser.add_argument('--use-ow', action='store_true')
+parser.add_argument('--ow-beta', type=float, default=1e-3)
 
 best_prec1 = 0
 args = parser.parse_args()
@@ -93,8 +120,9 @@ def main():
                       'from checkpoints.')
 
     # Data loading code
-    data = dataset.__dict__[args.data](root=args.data_dir, part='train', size=(args.height, args.width),
-                                       require_path=True, true_pair=True)
+    # data = dataset.__dict__[args.data](root=args.data_dir, part='train', size=(args.height, args.width),
+    #                                    require_path=True, true_pair=True)
+    data = dataset.__dict__[args.data](part='train', size=(args.height, args.width), require_path=True, true_pair=True)
     train_loader = torch.utils.data.DataLoader(
         data,
         batch_size=args.batch_size, shuffle=True,
@@ -104,7 +132,7 @@ def main():
 
     # create models
 
-    model = net(class_num=data.class_num)
+    model = net(class_num=data.class_num,args=args)
     model = torch.nn.DataParallel(model).cuda()
 
     # define loss function (criterion) and optimizer
@@ -161,17 +189,22 @@ def main():
 
 
 
-def train(train_loader, model, criterion, tl_criterion, optimizer, epoch):
+def train(train_loader, model, criterion, tl_criterion, optimizer, epoch, fixbase=False):
     batch_time = AverageMeter()
     data_time = AverageMeter()
     losses = AverageMeter()
     TLlosses = AverageMeter()
     top1 = AverageMeter()
+    if not fixbase and args.use_of and epoch >= args.of_start_epoch:
+        print('Using OF')
 
+    from loss.of_penalty import OFPenalty
+
+    of_penalty = OFPenalty(vars(args))
 
     # switch to train mode
     model.train()
-
+    open_all_layers(model)
     end = time.time()
     for i, (input, target, _, cams, positive, cams2) in enumerate(train_loader):
         # measure data loading time
@@ -195,6 +228,10 @@ def train(train_loader, model, criterion, tl_criterion, optimizer, epoch):
             tl_loss = torch.tensor([0], dtype=torch.float).cuda()
         else:
             tl_loss =  args.tloss*tl_criterion(all_feat, target)
+        if not fixbase and args.use_of and epoch >= args.of_start_epoch:
+
+            penalty = of_penalty(outputs)
+            loss += penalty
 
         total_loss = loss + tl_loss
 
